@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------
+    // Single-user allowlist: replace with YOUR Google account email.
+    // Must match the ALLOWED_EMAIL param configured for Cloud Functions.
+    // ---------------------------------------------------------------
+    function isAllowed() {
+      return request.auth != null
+        && request.auth.token.email == 'jasongu9@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isAllowed() && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      // OAuth tokens & server-only material: never readable from clients.
+      match /private/{doc=**} {
+        allow read, write: if false;
+      }
+
+      match /{collection}/{doc} {
+        allow read, write: if isOwner(uid) && collection != 'private';
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
