@@ -3,7 +3,7 @@
  * security is enforced by Firestore rules and the function-side allowlist.
  */
 export const firebaseConfig = {
-  apiKey: "AIzaSyC0XLmfiXeuILxPb84zNvj-SXDLQQn1wBE",
+  apiKey: "AIzaSyC0XLmfiXeuILxPb84zNVj-SXDLQQn1wBE",
   authDomain: "aura-c4b26.firebaseapp.com",
   projectId: "aura-c4b26",
   storageBucket: "aura-c4b26.firebasestorage.app",
