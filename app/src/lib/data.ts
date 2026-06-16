@@ -7,7 +7,7 @@ import { httpsCallable } from "firebase/functions";
 import { db, functions } from "./firebase";
 import { dateKey, daysAgoKey, fmtMinutes, fmtTime } from "./dates";
 import type {
-  UserDoc, FoodLog, WeightEntry, SleepRecord, Workout, DailySummary,
+  UserDoc, FoodLog, WeightEntry, SleepRecord, Nap, Workout, DailySummary,
   Integration, Estimate, CoachItem, MetricKey, TimelineEvent,
 } from "./types";
 
@@ -89,6 +89,7 @@ export function useIntegrations(uid: string): Integration[] {
 
 interface DayBundle {
   sleep: SleepRecord | null;
+  naps: Nap[];
   workouts: Workout[];
   food: FoodLog[];
   weight: WeightEntry | null;
@@ -96,6 +97,7 @@ interface DayBundle {
 
 export function useDayBundle(uid: string, date: string): DayBundle {
   const [sleep, setSleep] = useState<SleepRecord | null>(null);
+  const [naps, setNaps] = useState<Nap[]>([]);
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [food, setFood] = useState<FoodLog[]>([]);
   const [weight, setWeight] = useState<WeightEntry | null>(null);
@@ -104,6 +106,9 @@ export function useDayBundle(uid: string, date: string): DayBundle {
     const subs = [
       onSnapshot(doc(db, `users/${uid}/sleepRecords/${date}`), (s) =>
         setSleep(s.exists() ? (s.data() as SleepRecord) : null)
+      ),
+      onSnapshot(query(collection(db, `users/${uid}/naps`), where("date", "==", date)), (s) =>
+        setNaps(s.docs.map((d) => ({ id: d.id, ...(d.data() as Nap) })))
       ),
       onSnapshot(query(collection(db, `users/${uid}/workouts`), where("date", "==", date)), (s) =>
         setWorkouts(s.docs.map((d) => ({ id: d.id, ...(d.data() as Workout) })))
@@ -118,7 +123,7 @@ export function useDayBundle(uid: string, date: string): DayBundle {
     return () => subs.forEach((u) => u());
   }, [uid, date]);
 
-  return { sleep, workouts, food, weight };
+  return { sleep, naps, workouts, food, weight };
 }
 
 // ---------- timeline assembly (the Oura-style day rail) ----------
@@ -165,6 +170,17 @@ export function buildTimeline(b: DayBundle): TimelineEvent[] {
       time: hhmm(t), sortKey: f.loggedAt, type: "meal",
       title: f.mealType ? f.mealType.charAt(0).toUpperCase() + f.mealType.slice(1) : "Meal",
       sub: f.title, value: String(f.kcal), valueUnit: "kcal",
+    });
+  }
+  for (const n of b.naps ?? []) {
+    const t = new Date(n.end);
+    const startStr = n.start
+      ? new Date(n.start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+      : null;
+    ev.push({
+      time: hhmm(t), sortKey: t.getTime(), type: "sleep", title: "Nap",
+      sub: `Oura · napped ${fmtMinutes(n.durationMin)}${startStr ? ` since ${startStr}` : ""}`,
+      value: undefined, valueUnit: undefined,
     });
   }
   ev.sort((a, b2) => a.sortKey - b2.sortKey);

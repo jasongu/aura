@@ -60,6 +60,15 @@ export interface SleepRecord {
   score: number | null;
 }
 
+export interface Nap {
+  id?: string;
+  date: string;
+  start: string;
+  end: string;
+  durationMin: number;
+  source: string;
+}
+
 export interface Workout {
   id?: string;
   date: string;

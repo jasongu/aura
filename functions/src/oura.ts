@@ -148,24 +148,30 @@ export async function syncUser(
   const touched = new Set<string>();
   const batch = db.batch();
 
-  // Identify each day's MAIN sleep. Oura's `type` is unreliable here — it tags
-  // some naps as "sleep" — so we don't trust type alone. A period only counts as
-  // the night's sleep if Oura gave it a sleep score (only main sleep is scored)
-  // OR it's long enough to plausibly be a night (>= 4h). This rejects short,
-  // unscored naps (e.g. a 95-min afternoon nap) that would otherwise surface as a
-  // bogus evening "Woke up" event.
-  const NIGHT_MIN_SECONDS = 4 * 3600; // 4 hours
+  // Date the sleep by its actual WAKE timestamp, not Oura's `day` field. Oura's
+  // `day` can bucket an afternoon nap (or odd session) onto the wrong calendar
+  // day; the wake time is what the user experienced. We use the date portion of
+  // bedtime_end exactly as Oura sends it (it carries the user's UTC offset), so a
+  // 6:10 PM wake on the 15th keys to 2026-06-15, not 2026-06-16.
+  const wakeDay = (p: SleepPeriod) => p.bedtime_end.slice(0, 10);
+
+  // Let Oura decide what's a night vs a nap. Oura only computes a sleep SCORE for
+  // your main sleep period — naps and rest are unscored. So: scored (or explicitly
+  // typed long_sleep) = the night's sleep; any other real sleep = a nap.
   const scoreByDay = new Map(dailySleep.map((d) => [d.day, d.score]));
   const longestByDay = new Map<string, SleepPeriod>();
+  const naps: SleepPeriod[] = [];
   for (const p of sleepPeriods) {
     if (p.type === "rest") continue;
     const dur = p.total_sleep_duration ?? 0;
     const hasScore = scoreByDay.get(p.day) != null;
-    const isNight = p.type === "long_sleep" || hasScore || dur >= NIGHT_MIN_SECONDS;
-    if (!isNight) continue;
-    const cur = longestByDay.get(p.day);
-    if (!cur || dur > (cur.total_sleep_duration ?? 0)) {
-      longestByDay.set(p.day, p);
+    const isNight = p.type === "long_sleep" || hasScore;
+    if (isNight) {
+      const key = wakeDay(p);
+      const cur = longestByDay.get(key);
+      if (!cur || dur > (cur.total_sleep_duration ?? 0)) longestByDay.set(key, p);
+    } else if (dur > 0) {
+      naps.push(p);
     }
   }
   for (const [day, p] of longestByDay) {
@@ -177,7 +183,25 @@ export async function syncUser(
         bedtime: p.bedtime_start,
         wakeTime: p.bedtime_end,
         durationMin: Math.round((p.total_sleep_duration ?? 0) / 60),
-        score: scoreByDay.get(day) ?? null,
+        score: scoreByDay.get(p.day) ?? null,
+        source: "oura",
+      },
+      { merge: true }
+    );
+  }
+  // Naps: their own collection, dated by the nap's actual day, keyed by start time
+  // so multiple naps per day don't collide.
+  for (const p of naps) {
+    const day = wakeDay(p);
+    touched.add(day);
+    const id = `oura_${p.bedtime_start.replace(/[^0-9]/g, "").slice(0, 14)}`;
+    batch.set(
+      db.doc(`users/${uid}/naps/${id}`),
+      {
+        date: day,
+        start: p.bedtime_start,
+        end: p.bedtime_end,
+        durationMin: Math.round((p.total_sleep_duration ?? 0) / 60),
         source: "oura",
       },
       { merge: true }
