@@ -16,6 +16,15 @@ export const callEstimateFood = httpsCallable<{ text: string }, Estimate>(functi
 export const callGenerateCoach = httpsCallable<{ refresh?: boolean }, { items: CoachItem[]; generatedAt: number; cached: boolean }>(functions, "generateCoach");
 export const callGetOuraAuthUrl = httpsCallable<unknown, { url: string }>(functions, "getOuraAuthUrl");
 export const callDisconnectOura = httpsCallable(functions, "disconnectOura");
+export const callSyncOuraNow = httpsCallable<unknown, { ok: boolean; days: number }>(functions, "syncOuraNow");
+
+export const METRIC_LABEL: Record<MetricKey, string> = {
+  weight: "Weight",
+  calories: "Calories",
+  macros: "Protein",
+  sleep: "Sleep",
+  activity: "Activity",
+};
 
 // ---------- generic listeners ----------
 function useDocData<T>(path: string | null): T | null {

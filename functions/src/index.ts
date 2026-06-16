@@ -202,6 +202,22 @@ export const disconnectOura = onCall(async (req) => {
   return { ok: true };
 });
 
+// On-demand sync triggered by the "Sync now" button (same work as the scheduled job).
+export const syncOuraNow = onCall(
+  { secrets: [OURA_CLIENT_ID, OURA_CLIENT_SECRET], timeoutSeconds: 120 },
+  async (req) => {
+    const uid = requireOwner(req);
+    const db = getFirestore();
+    const conn = await db.doc(`users/${uid}/integrations/oura`).get();
+    if (!conn.exists || conn.data()?.status !== "connected") {
+      throw new HttpsError("failed-precondition", "Oura isn't connected.");
+    }
+    const touched = await syncUser(uid, OURA_CLIENT_ID.value(), OURA_CLIENT_SECRET.value(), 7);
+    for (const day of touched) await recomputeDay(uid, day);
+    return { ok: true, days: touched.size };
+  }
+);
+
 // ----- scheduled sync ---------------------------------------------------------
 export const ouraSync = onSchedule(
   { schedule: "every 4 hours", secrets: [OURA_CLIENT_ID, OURA_CLIENT_SECRET], timeoutSeconds: 300 },

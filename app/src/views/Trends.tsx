@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { LineChart, Sparkline } from "../components/Charts";
 import { MetricSwitcher } from "../components/Widgets";
-import { useSummaries, useWeights, useMemoSeries } from "../lib/data";
+import { useSummaries, useWeights, useMemoSeries, METRIC_LABEL } from "../lib/data";
 import { fmtMinutes } from "../lib/dates";
 import type { MetricKey } from "../lib/types";
 
@@ -70,7 +70,7 @@ export default function Trends({ uid, rangeDays }: { uid: string; rangeDays: num
           <div className="label" style={{ flex: 1 }}>Last {rangeDays} days</div>
           <MetricSwitcher value={metric} onChange={setMetric} />
         </div>
-        <LineChart series={series} unit={unit} height={280} />
+        <LineChart series={series} unit={unit} height={280} metricLabel={METRIC_LABEL[metric]} interactive />
         <div style={{ display: "flex", gap: 26, marginTop: 14, flexWrap: "wrap" }}>
           {stats[metric].map((s) => (
             <div key={s.k}>

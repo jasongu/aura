@@ -99,7 +99,7 @@ const METRICS: { key: MetricKey; name: string }[] = [
 
 export function MetricSwitcher({ value, onChange }: { value: MetricKey; onChange: (m: MetricKey) => void }) {
   return (
-    <div className="chips">
+    <div className="chips chips-scroll">
       {METRICS.map((m) => (
         <button key={m.key} className={`chip ${value === m.key ? "active" : ""}`} onClick={() => onChange(m.key)}>
           {m.name}

@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
 import { auth, googleProvider } from "./lib/firebase";
 import { ALLOWED_EMAIL } from "./lib/config";
-import { ensureUserDoc, useUserDoc, useIntegrations, useDayBundle, useTodayFood, buildTimeline, useMediaQuery } from "./lib/data";
-import { dateKey, greeting, prettyDate } from "./lib/dates";
-import { IconGrid, IconTrend, IconBowl, IconSpark, IconUser, IconClock, IconRing } from "./components/Icons";
+import { ensureUserDoc, useUserDoc, useIntegrations, useDayBundle, useTodayFood, useSummaries, buildTimeline, useMediaQuery, callSyncOuraNow } from "./lib/data";
+import { dateKey, daysAgoKey, greeting, prettyDate, timeAgo, fmtMinutes } from "./lib/dates";
+import { IconGrid, IconTrend, IconBowl, IconSpark, IconUser, IconClock, IconRing, IconRefresh } from "./components/Icons";
+import { NetRing } from "./components/Charts";
 import { Timeline } from "./components/Widgets";
 import Dashboard from "./views/Dashboard";
 import Trends from "./views/Trends";
@@ -88,13 +89,94 @@ function NotAllowed({ email }: { email: string }) {
 
 function MobileTimeline({ uid }: { uid: string }) {
   const today = dateKey();
-  const bundle = useDayBundle(uid, today);
+  const [tlOffset, setTlOffset] = useState(0);
+  const tlDate = tlOffset === 0 ? today : daysAgoKey(-tlOffset);
+  const bundle = useDayBundle(uid, tlDate);
   const todayFood = useTodayFood(uid);
-  const events = useMemo(() => buildTimeline({ ...bundle, food: todayFood }), [bundle, todayFood]);
+  const summaries = useSummaries(uid, 30);
+  const integrations = useIntegrations(uid);
+  const oura = integrations.find((i) => i.provider === "oura");
+  const [syncing, setSyncing] = useState(false);
+  const syncOura = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try { await callSyncOuraNow({}); } catch { /* non-fatal */ } finally { setSyncing(false); }
+  };
+  const events = useMemo(
+    () => buildTimeline(tlOffset === 0 ? { ...bundle, food: todayFood } : bundle),
+    [bundle, todayFood, tlOffset]
+  );
+
+  const sum = summaries.find((s) => s.date === tlDate);
+  const minOffset = -29;
+  const dayCtx =
+    tlOffset === 0 ? "Today" : tlOffset === -1 ? "Yesterday" : "";
+  const weekday = (() => {
+    const [y, m, d] = tlDate.split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "long" });
+  })();
+  const bigDate = (() => {
+    const [y, m, d] = tlDate.split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  })();
+
   return (
-    <div className="card">
-      <div className="label">Today's timeline</div>
-      <Timeline events={events} empty="Nothing yet today — log a meal or wait for the next Oura sync." />
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Day header with steppers */}
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <div className="label" style={{ letterSpacing: "0.08em" }}>
+            {dayCtx ? `${dayCtx} · ${weekday}` : weekday}
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.6px", marginTop: 2 }}>{bigDate}</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="tl-nav" aria-label="Previous day" disabled={tlOffset <= minOffset}
+            onClick={() => setTlOffset((o) => Math.max(minOffset, o - 1))}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+          </button>
+          <button className="tl-nav" aria-label="Next day" disabled={tlOffset >= 0}
+            onClick={() => setTlOffset((o) => Math.min(0, o + 1))}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Day-summary card: net-kcal ring + 2x2 stat grid */}
+      <div className="card" style={{ display: "flex", gap: 16, alignItems: "center" }}>
+        <NetRing intake={sum?.intakeKcal ?? 0} burned={sum?.burnedKcal ?? 0} />
+        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div><div className="label">Intake</div><div style={{ fontSize: 17, fontWeight: 700 }}>{sum?.intakeKcal ?? 0}<span className="faint" style={{ fontSize: 12, fontWeight: 600 }}> kcal</span></div></div>
+          <div><div className="label">Burned</div><div style={{ fontSize: 17, fontWeight: 700 }}>{sum?.burnedKcal ?? "—"}<span className="faint" style={{ fontSize: 12, fontWeight: 600 }}> kcal</span></div></div>
+          <div><div className="label">Sleep</div><div style={{ fontSize: 17, fontWeight: 700 }}>{fmtMinutes(sum?.sleepDurationMin ?? null)}</div></div>
+          <div><div className="label">Steps</div><div style={{ fontSize: 17, fontWeight: 700 }}>{sum?.steps != null ? sum.steps.toLocaleString() : "—"}</div></div>
+        </div>
+      </div>
+
+      {/* Oura sync row (mobile has no sidebar, so the sync control lives here) */}
+      {oura?.status === "connected" && (
+        <div className="card" style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px" }}>
+          <div style={{ width: 34, height: 34, flex: "none", borderRadius: "50%", background: "var(--accent-soft, rgba(52,211,153,0.15))", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--emerald)" }}>
+            <IconRing size={18} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>Oura Ring</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {syncing ? "Pulling sleep & activity…" : `Synced ${oura.lastSyncedAt ? timeAgo(oura.lastSyncedAt.toMillis()) : "recently"}`}
+            </div>
+          </div>
+          <button className="oura-sync" style={{ width: "auto", margin: 0, borderRadius: 21, padding: "8px 14px", flex: "none" }} onClick={syncOura} disabled={syncing}>
+            <span className={syncing ? "spin" : ""} style={{ display: "inline-flex" }}><IconRefresh size={14} /></span>
+            {syncing ? "Syncing…" : "Sync Oura"}
+          </button>
+        </div>
+      )}
+
+      {/* Event rail */}
+      <div className="card">
+        <div className="label">Your day</div>
+        <Timeline events={events} empty={tlOffset === 0 ? "Nothing yet today — log a meal or wait for the next Oura sync." : "No events recorded on this day."} />
+      </div>
     </div>
   );
 }
@@ -160,6 +242,19 @@ function Shell(props: {
   const firstName = (userDoc?.name ?? displayName).split(" ")[0];
   const initials = (userDoc?.name ?? displayName).split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 
+  const [ouraSyncing, setOuraSyncing] = useState(false);
+  const syncOura = async () => {
+    if (ouraSyncing) return;
+    setOuraSyncing(true);
+    try {
+      await callSyncOuraNow({});
+    } catch {
+      /* status text reflects last successful sync; errors are non-fatal here */
+    } finally {
+      setOuraSyncing(false);
+    }
+  };
+
   if (!userDoc) {
     return <div className="auth-wrap"><div className="spinner" /></div>;
   }
@@ -192,8 +287,20 @@ function Shell(props: {
             Oura {oura?.status === "connected" ? "connected" : "not connected"}
           </div>
           <div className="faint" style={{ fontSize: 11.5, marginTop: 3 }}>
-            {oura?.status === "connected" ? "Sleep & activity syncing every 4h" : "Connect it from Profile"}
+            {oura?.status === "connected"
+              ? ouraSyncing
+                ? "Syncing with Oura…"
+                : `Sleep, readiness & activity · synced ${oura.lastSyncedAt ? timeAgo(oura.lastSyncedAt.toMillis()) : "recently"}`
+              : "Connect it from Profile"}
           </div>
+          {oura?.status === "connected" && (
+            <button className="oura-sync" onClick={syncOura} disabled={ouraSyncing}>
+              <span className={ouraSyncing ? "spin" : ""} style={{ display: "inline-flex" }}>
+                <IconRefresh size={14} />
+              </span>
+              {ouraSyncing ? "Syncing…" : "Sync now"}
+            </button>
+          )}
         </div>
         <div className="user-chip">
           <div className="avatar">{initials}</div>
@@ -222,12 +329,7 @@ function Shell(props: {
         </div>
 
         {view === "dashboard" && <Dashboard uid={uid} user={userDoc} rangeDays={rangeDays} />}
-        {view === "timeline" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <MobileTimeline uid={uid} />
-            <Dashboard uid={uid} user={userDoc} rangeDays={rangeDays} />
-          </div>
-        )}
+        {view === "timeline" && <MobileTimeline uid={uid} />}
         {view === "trends" && <Trends uid={uid} rangeDays={rangeDays} />}
         {view === "nutrition" && <Nutrition uid={uid} user={userDoc} />}
         {view === "coach" && <Coach uid={uid} />}
