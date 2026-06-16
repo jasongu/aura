@@ -128,8 +128,13 @@ export async function syncUser(
   const db = getFirestore();
   const token = await freshAccessToken(uid, clientId, clientSecret);
 
-  const end = new Date();
-  const start = new Date(end.getTime() - days * 86400_000);
+  // Query window: go back `days` and extend the end to TOMORROW. Oura's end_date
+  // can behave as exclusive, and the function runs in UTC while the user's records
+  // are stamped in their local day — extending past today guarantees today's
+  // sleep/workouts/activity are always inside the queried range.
+  const now = new Date();
+  const start = new Date(now.getTime() - days * 86400_000);
+  const end = new Date(now.getTime() + 86400_000); // tomorrow
   const iso = (d: Date) => d.toISOString().slice(0, 10);
   const [s, e] = [iso(start), iso(end)];
 

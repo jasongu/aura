@@ -129,9 +129,13 @@ export function buildTimeline(b: DayBundle): TimelineEvent[] {
   const ev: TimelineEvent[] = [];
   if (b.sleep) {
     const wake = new Date(b.sleep.wakeTime);
+    const asleep = b.sleep.bedtime ? new Date(b.sleep.bedtime) : null;
+    const asleepStr = asleep && !isNaN(asleep.getTime())
+      ? asleep.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+      : null;
     ev.push({
       time: hhmm(wake), sortKey: wake.getTime(), type: "sleep", title: "Woke up",
-      sub: `Oura · slept ${fmtMinutes(b.sleep.durationMin)}${b.sleep.score != null ? ` · score ${b.sleep.score}` : ""}`,
+      sub: `Oura · slept ${fmtMinutes(b.sleep.durationMin)}${asleepStr ? ` since ${asleepStr}` : ""}${b.sleep.score != null ? ` · score ${b.sleep.score}` : ""}`,
       value: b.sleep.score != null ? String(b.sleep.score) : undefined,
       valueUnit: b.sleep.score != null ? "score" : undefined,
     });
