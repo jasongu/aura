@@ -148,13 +148,23 @@ export async function syncUser(
   const touched = new Set<string>();
   const batch = db.batch();
 
-  // Longest sleep period per day = the night's sleep; daily_sleep supplies the score.
+  // Identify each day's MAIN sleep. Oura's `type` is unreliable here — it tags
+  // some naps as "sleep" — so we don't trust type alone. A period only counts as
+  // the night's sleep if Oura gave it a sleep score (only main sleep is scored)
+  // OR it's long enough to plausibly be a night (>= 4h). This rejects short,
+  // unscored naps (e.g. a 95-min afternoon nap) that would otherwise surface as a
+  // bogus evening "Woke up" event.
+  const NIGHT_MIN_SECONDS = 4 * 3600; // 4 hours
   const scoreByDay = new Map(dailySleep.map((d) => [d.day, d.score]));
   const longestByDay = new Map<string, SleepPeriod>();
   for (const p of sleepPeriods) {
     if (p.type === "rest") continue;
+    const dur = p.total_sleep_duration ?? 0;
+    const hasScore = scoreByDay.get(p.day) != null;
+    const isNight = p.type === "long_sleep" || hasScore || dur >= NIGHT_MIN_SECONDS;
+    if (!isNight) continue;
     const cur = longestByDay.get(p.day);
-    if (!cur || (p.total_sleep_duration ?? 0) > (cur.total_sleep_duration ?? 0)) {
+    if (!cur || dur > (cur.total_sleep_duration ?? 0)) {
       longestByDay.set(p.day, p);
     }
   }
