@@ -155,20 +155,36 @@ export async function syncUser(
   // 6:10 PM wake on the 15th keys to 2026-06-15, not 2026-06-16.
   const wakeDay = (p: SleepPeriod) => p.bedtime_end.slice(0, 10);
 
-  // Classify each sleep period. Oura tags naps inconsistently — sometimes "sleep",
-  // sometimes "rest" — so we DON'T skip by type. Instead: a period with a sleep
-  // score (or explicitly long_sleep) is the night's main sleep; any other period
-  // that contains real sleep is a nap. Only periods with negligible sleep (pure
-  // "rest" with little/no actual sleep) are ignored.
+  // Pick each day's MAIN sleep = the longest period (or an explicit long_sleep),
+  // then everything else that contains real sleep is a nap. We must NOT use the
+  // day-level sleep score to decide this: a nap shares its Oura `day` with the
+  // night's sleep, so a day-level "scored" flag is true for the nap too and would
+  // wrongly mark it as night (then it loses the longest-per-day contest and
+  // vanishes). So classification is purely longest-per-day vs. the rest.
   const NAP_MIN_SECONDS = 10 * 60; // ignore <10 min of sleep (noise)
   const scoreByDay = new Map(dailySleep.map((d) => [d.day, d.score]));
+
+  // First pass: find the main (longest) sleep period per Oura day.
+  const mainByOuraDay = new Map<string, SleepPeriod>();
+  for (const p of sleepPeriods) {
+    const dur = p.total_sleep_duration ?? 0;
+    if (dur <= 0 && p.type !== "long_sleep") continue;
+    const cur = mainByOuraDay.get(p.day);
+    const better =
+      !cur ||
+      (p.type === "long_sleep" && cur.type !== "long_sleep") ||
+      ((p.type === "long_sleep") === (cur.type === "long_sleep") && dur > (cur.total_sleep_duration ?? 0));
+    if (better) mainByOuraDay.set(p.day, p);
+  }
+
+  // Second pass: the per-day main = night sleep (keyed by wake date); all other
+  // real-sleep periods = naps.
   const longestByDay = new Map<string, SleepPeriod>();
   const naps: SleepPeriod[] = [];
   for (const p of sleepPeriods) {
     const dur = p.total_sleep_duration ?? 0;
-    const hasScore = scoreByDay.get(p.day) != null;
-    const isNight = p.type === "long_sleep" || hasScore;
-    if (isNight) {
+    const isMain = mainByOuraDay.get(p.day) === p;
+    if (isMain) {
       const key = wakeDay(p);
       const cur = longestByDay.get(key);
       if (!cur || dur > (cur.total_sleep_duration ?? 0)) longestByDay.set(key, p);

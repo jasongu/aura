@@ -128,7 +128,7 @@ export function useDayBundle(uid: string, date: string): DayBundle {
 
 // ---------- timeline assembly (the Oura-style day rail) ----------
 const hhmm = (d: Date) =>
-  `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
 export function buildTimeline(b: DayBundle): TimelineEvent[] {
   const ev: TimelineEvent[] = [];
