@@ -155,14 +155,16 @@ export async function syncUser(
   // 6:10 PM wake on the 15th keys to 2026-06-15, not 2026-06-16.
   const wakeDay = (p: SleepPeriod) => p.bedtime_end.slice(0, 10);
 
-  // Let Oura decide what's a night vs a nap. Oura only computes a sleep SCORE for
-  // your main sleep period — naps and rest are unscored. So: scored (or explicitly
-  // typed long_sleep) = the night's sleep; any other real sleep = a nap.
+  // Classify each sleep period. Oura tags naps inconsistently — sometimes "sleep",
+  // sometimes "rest" — so we DON'T skip by type. Instead: a period with a sleep
+  // score (or explicitly long_sleep) is the night's main sleep; any other period
+  // that contains real sleep is a nap. Only periods with negligible sleep (pure
+  // "rest" with little/no actual sleep) are ignored.
+  const NAP_MIN_SECONDS = 10 * 60; // ignore <10 min of sleep (noise)
   const scoreByDay = new Map(dailySleep.map((d) => [d.day, d.score]));
   const longestByDay = new Map<string, SleepPeriod>();
   const naps: SleepPeriod[] = [];
   for (const p of sleepPeriods) {
-    if (p.type === "rest") continue;
     const dur = p.total_sleep_duration ?? 0;
     const hasScore = scoreByDay.get(p.day) != null;
     const isNight = p.type === "long_sleep" || hasScore;
@@ -170,7 +172,7 @@ export async function syncUser(
       const key = wakeDay(p);
       const cur = longestByDay.get(key);
       if (!cur || dur > (cur.total_sleep_duration ?? 0)) longestByDay.set(key, p);
-    } else if (dur > 0) {
+    } else if (dur >= NAP_MIN_SECONDS) {
       naps.push(p);
     }
   }
